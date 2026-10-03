@@ -1,0 +1,182 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Enter the IP address or hostname of your Tuneshine.",
+        "data": {
+          "host": "Host"
+        },
+        "data_description": {
+          "host": "For example 192.168.1.50 or tuneshine-1234.local"
+        }
+      },
+      "zeroconf_confirm": {
+        "description": "Add {name} ({host}) to Home Assistant?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the Tuneshine. Check the address and that it's on the same network."
+    },
+    "abort": {
+      "already_configured": "This Tuneshine is already set up.",
+      "cannot_connect": "Could not connect to the Tuneshine."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Idle screen",
+        "description": "Choose what the Tuneshine shows while nothing is playing. Pages rotate in the order selected; artwork takes over as soon as music plays.",
+        "data": {
+          "pages": "Pages",
+          "rotate_interval": "Seconds per page",
+          "clock_24h": "24-hour clock",
+          "clock_show_date": "Show day and date under the clock",
+          "weather_entity": "Weather entity",
+          "camera_entities": "Cameras",
+          "camera_label": "Show camera name",
+          "templates": "Templates",
+          "active_from": "Active from",
+          "active_to": "Active until",
+          "active_entity": "Only while this entity is on"
+        },
+        "data_description": {
+          "camera_entities": "A random camera from this list is shown each time the camera page comes round.",
+          "templates": "Each template is its own page with its own colour scheme. Use | or a new line to split lines; a short first line becomes a coloured heading tag. For example: Office|{{ states('sensor.office_temperature') }}°",
+          "active_from": "Leave both times empty to run all day. Windows can cross midnight, e.g. 07:00 to 23:00 or 22:00 to 06:00.",
+          "active_to": "Outside these hours the Tuneshine shows its own idle image.",
+          "active_entity": "Optional. The pages only show while this is on or home, e.g. a schedule helper, an input boolean, a person or a presence sensor."
+        }
+      }
+    },
+    "error": {
+      "no_pages": "Pick at least one page.",
+      "weather_required": "Choose a weather entity for the weather page.",
+      "camera_required": "Choose at least one camera for the camera page.",
+      "template_required": "Add at least one template for the template page.",
+      "schedule_incomplete": "Set both times, or leave both empty."
+    }
+  },
+  "selector": {
+    "pages": {
+      "options": {
+        "clock": "Clock",
+        "weather": "Weather",
+        "camera": "Random camera",
+        "template": "Templates"
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "next_page": {
+        "name": "Next idle page"
+      }
+    },
+    "image": {
+      "artwork": {
+        "name": "Artwork"
+      }
+    },
+    "number": {
+      "active_brightness": {
+        "name": "Active brightness"
+      },
+      "idle_brightness": {
+        "name": "Idle brightness"
+      }
+    },
+    "sensor": {
+      "now_playing": {
+        "name": "Now playing"
+      },
+      "image_source": {
+        "name": "Image source",
+        "state": {
+          "system": "System",
+          "local": "Local",
+          "remote": "Remote"
+        }
+      },
+      "idle_page": {
+        "name": "Idle page"
+      }
+    },
+    "switch": {
+      "idle_screen": {
+        "name": "Home Assistant idle screen"
+      }
+    }
+  },
+  "services": {
+    "show_text": {
+      "name": "Show text",
+      "description": "Show a message on the Tuneshine for a while, over artwork too.",
+      "fields": {
+        "device_id": {
+          "name": "Tuneshine",
+          "description": "Leave empty for every Tuneshine."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Use | or a new line to split lines. Templates are supported."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long to show it for."
+        },
+        "color": {
+          "name": "Colour",
+          "description": "Colour scheme for the message. Defaults to red."
+        }
+      }
+    },
+    "show_image": {
+      "name": "Show image",
+      "description": "Show a camera snapshot or an image from a URL for a while, over artwork too.",
+      "fields": {
+        "device_id": {
+          "name": "Tuneshine",
+          "description": "Leave empty for every Tuneshine."
+        },
+        "camera_entity": {
+          "name": "Camera",
+          "description": "Camera to snapshot."
+        },
+        "url": {
+          "name": "URL",
+          "description": "Image to download instead of a camera."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long to show it for."
+        }
+      }
+    },
+    "show_page": {
+      "name": "Show page",
+      "description": "Jump the idle rotation to a page.",
+      "fields": {
+        "device_id": {
+          "name": "Tuneshine",
+          "description": "Leave empty for every Tuneshine."
+        },
+        "page": {
+          "name": "Page",
+          "description": "clock, weather, camera, template or template_2 and so on."
+        }
+      }
+    },
+    "clear": {
+      "name": "Clear",
+      "description": "End a message or image shown by Show text or Show image.",
+      "fields": {
+        "device_id": {
+          "name": "Tuneshine",
+          "description": "Leave empty for every Tuneshine."
+        }
+      }
+    }
+  }
+}
