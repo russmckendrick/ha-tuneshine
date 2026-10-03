@@ -18,6 +18,7 @@ CONF_CLOCK_SHOW_DATE: Final = "clock_show_date"
 CONF_WEATHER_ENTITY: Final = "weather_entity"
 CONF_CAMERA_ENTITIES: Final = "camera_entities"
 CONF_CAMERA_LABEL: Final = "camera_label"
+CONF_CAMERA_INTERVAL: Final = "camera_interval"
 CONF_TEMPLATES: Final = "templates"
 CONF_ACTIVE_FROM: Final = "active_from"
 CONF_ACTIVE_TO: Final = "active_to"
@@ -31,6 +32,8 @@ PAGE_TYPES: Final = [PAGE_CLOCK, PAGE_WEATHER, PAGE_CAMERA, PAGE_TEMPLATE]
 
 DEFAULT_PAGES: Final = [PAGE_CLOCK]
 DEFAULT_ROTATE_INTERVAL: Final = 15
+# Minutes between camera snapshots; 0 means every time the page comes round.
+DEFAULT_CAMERA_INTERVAL: Final = 10
 DEFAULT_ALERT_COLOR: Final = (255, 70, 50)
 
 SERVICE_NAME: Final = "Home Assistant"

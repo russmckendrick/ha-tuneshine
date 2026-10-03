@@ -35,6 +35,7 @@
           "clock_show_date": "Show day and date under the clock",
           "weather_entity": "Weather entity",
           "camera_entities": "Cameras",
+          "camera_interval": "Show cameras every",
           "camera_label": "Show camera name",
           "templates": "Templates",
           "active_from": "Active from",
@@ -43,7 +44,8 @@
         },
         "data_description": {
           "camera_entities": "A random camera from this list is shown each time the camera page comes round.",
-          "templates": "Each template is its own page with its own colour scheme. Use | or a new line to split lines; a short first line becomes a coloured heading tag. For example: Office|{{ states('sensor.office_temperature') }}°",
+          "camera_interval": "Minutes between camera snapshots. In between, the camera page is skipped. Battery cameras can wake up for every snapshot, so keep this high for them. 0 shows a fresh snapshot every time round.",
+          "templates": "Each template is its own page with its own colour scheme. Use | or a new line to split lines; a short first line becomes a coloured heading tag. See the README for examples.",
           "active_from": "Leave both times empty to run all day. Windows can cross midnight, e.g. 07:00 to 23:00 or 22:00 to 06:00.",
           "active_to": "Outside these hours the Tuneshine shows its own idle image.",
           "active_entity": "Optional. The pages only show while this is on or home, e.g. a schedule helper, an input boolean, a person or a presence sensor."

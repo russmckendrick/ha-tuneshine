@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import time
 from typing import Any
+from unittest.mock import AsyncMock
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from PIL import Image
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
@@ -218,4 +221,71 @@ async def test_repushes_when_cloud_replaces_our_page(
     # No further state changes arrive, but the page is pushed again after the grace period.
     await _wait_for(lambda: _calls(aioclient_mock, "POST", URL_IMAGE), timeout=3)
     assert pushes >= 1
+    await hass.config_entries.async_unload(config_entry.entry_id)
+
+
+async def test_camera_interval_reuses_snapshot_and_skips_page(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Battery cameras are only woken every camera_interval minutes."""
+    hass.states.async_set("camera.front", "idle", {"friendly_name": "Front"})
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=MAC,
+        data={"host": HOST},
+        options={
+            "pages": ["clock", "camera"],
+            "camera_entities": ["camera.front"],
+            "camera_interval": 10,
+        },
+    )
+    _mock_device(aioclient_mock, IDLE_STATE)
+    await _setup(hass, config_entry)
+    idle = config_entry.runtime_data.idle
+    clock, camera = idle.pages
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (320, 180), (200, 30, 30)).save(buffer, format="JPEG")
+    fetch = AsyncMock(return_value=buffer.getvalue())
+    idle._fetch_snapshot = fetch
+
+    # No snapshot yet, so the camera page is due.
+    idle._index = 0
+    assert idle._next_index() == 1
+    await idle._prepare(camera)
+    await idle._prepare(camera)
+    assert fetch.await_count == 1
+
+    # Within the interval the rotation skips the camera page.
+    idle._index = 0
+    assert idle._next_index() == 0
+
+    # Once the interval has passed it comes round again with a fresh snapshot.
+    idle._camera_fetched_at -= 10 * 60
+    assert idle._next_index() == 1
+    await idle._prepare(camera)
+    assert fetch.await_count == 2
+    assert clock.kind == "clock"
+    await hass.config_entries.async_unload(config_entry.entry_id)
+
+
+async def test_camera_interval_zero_always_fetches(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    hass.states.async_set("camera.front", "idle")
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=MAC,
+        data={"host": HOST},
+        options={"pages": ["camera"], "camera_entities": ["camera.front"], "camera_interval": 0},
+    )
+    _mock_device(aioclient_mock, IDLE_STATE)
+    await _setup(hass, config_entry)
+    idle = config_entry.runtime_data.idle
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64)).save(buffer, format="JPEG")
+    idle._fetch_snapshot = AsyncMock(return_value=buffer.getvalue())
+    await idle._prepare(idle.pages[0])
+    await idle._prepare(idle.pages[0])
+    assert idle._fetch_snapshot.await_count == 2
     await hass.config_entries.async_unload(config_entry.entry_id)

@@ -96,6 +96,7 @@ async def test_options_validation(
         "clock_24h": True,
         "clock_show_date": True,
         "camera_label": True,
+        "camera_interval": 10,
     }
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)

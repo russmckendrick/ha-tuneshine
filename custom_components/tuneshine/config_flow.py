@@ -32,6 +32,7 @@ from .const import (
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
     CONF_CAMERA_ENTITIES,
+    CONF_CAMERA_INTERVAL,
     CONF_CAMERA_LABEL,
     CONF_CLOCK_24H,
     CONF_CLOCK_SHOW_DATE,
@@ -39,6 +40,7 @@ from .const import (
     CONF_ROTATE_INTERVAL,
     CONF_TEMPLATES,
     CONF_WEATHER_ENTITY,
+    DEFAULT_CAMERA_INTERVAL,
     DEFAULT_PAGES,
     DEFAULT_ROTATE_INTERVAL,
     DOMAIN,
@@ -155,6 +157,14 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
                 CONF_CAMERA_ENTITIES, description=suggested(CONF_CAMERA_ENTITIES)
             ): EntitySelector(EntitySelectorConfig(domain="camera", multiple=True)),
             vol.Required(
+                CONF_CAMERA_INTERVAL,
+                default=options.get(CONF_CAMERA_INTERVAL, DEFAULT_CAMERA_INTERVAL),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0, max=1440, step=1, unit_of_measurement="min", mode=NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
                 CONF_CAMERA_LABEL, default=options.get(CONF_CAMERA_LABEL, True)
             ): BooleanSelector(),
             vol.Optional(CONF_TEMPLATES, description=suggested(CONF_TEMPLATES)): TextSelector(
@@ -190,6 +200,7 @@ class TuneshineOptionsFlow(OptionsFlow):
                 errors[CONF_ACTIVE_TO] = "schedule_incomplete"
             else:
                 user_input[CONF_ROTATE_INTERVAL] = int(user_input[CONF_ROTATE_INTERVAL])
+                user_input[CONF_CAMERA_INTERVAL] = int(user_input[CONF_CAMERA_INTERVAL])
                 return self.async_create_entry(data=user_input)
             options = user_input
         else:

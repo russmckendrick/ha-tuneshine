@@ -25,7 +25,7 @@ The Tuneshine's local API lets you set a local idle image marked as *overridable
 | --- | --- |
 | Clock | Big time with a colour scheme that changes through the day, the weekday tag, the date and a day-progress bar. 12- or 24-hour. |
 | Weather | A shaded icon for the condition, temperature coloured from icy blue to hot red, and today's high and low from the daily forecast. |
-| Random camera | A snapshot from one of your chosen cameras (never the same one twice in a row), cropped and punched up for LEDs, with a name tag. |
+| Random camera | A snapshot from one of your chosen cameras (never the same one twice in a row), cropped and punched up for LEDs, with a name tag. **Show cameras every** (default 10 minutes) limits how often a snapshot is taken, which saves battery cameras like Ring doorbells being woken up; in between, the camera page is skipped. |
 | Templates | One page per template, each with its own colour scheme. Split lines with `\|` or a newline. A short first line becomes a coloured heading tag. Short values are drawn big. |
 
 Template examples:

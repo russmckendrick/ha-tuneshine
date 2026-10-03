@@ -34,6 +34,7 @@ from .const import (
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
     CONF_CAMERA_ENTITIES,
+    CONF_CAMERA_INTERVAL,
     CONF_CAMERA_LABEL,
     CONF_CLOCK_24H,
     CONF_CLOCK_SHOW_DATE,
@@ -41,6 +42,7 @@ from .const import (
     CONF_ROTATE_INTERVAL,
     CONF_TEMPLATES,
     CONF_WEATHER_ENTITY,
+    DEFAULT_CAMERA_INTERVAL,
     DEFAULT_PAGES,
     DEFAULT_ROTATE_INTERVAL,
     ITEM_PREFIX,
@@ -148,6 +150,9 @@ class IdleScreenManager:
         self._push_failures = 0
         self._failed_pages: set[str] = set()
         self._last_camera: str | None = None
+        # The last snapshot, reused until the camera interval has passed.
+        self._camera_snapshot: tuple[bytes, str | None] | None = None
+        self._camera_fetched_at = 0.0
         self._forecast: dict[str, tuple[float, float | None, float | None]] = {}
 
     # ----------------------------------------------------------------- lifecycle
@@ -226,8 +231,7 @@ class IdleScreenManager:
     @callback
     def async_next_page(self) -> None:
         """Skip to the next page now."""
-        if self.pages:
-            self._index = (self._index + 1) % len(self.pages)
+        self._index = self._next_index()
         self._rotate_at = time.monotonic() + self._interval
         self._notify()
         self._wake.set()
@@ -278,6 +282,26 @@ class IdleScreenManager:
     @property
     def _interval(self) -> float:
         return float(self.options.get(CONF_ROTATE_INTERVAL, DEFAULT_ROTATE_INTERVAL))
+
+    @property
+    def _camera_due(self) -> bool:
+        """Whether it's time for a fresh camera snapshot."""
+        minutes = float(self.options.get(CONF_CAMERA_INTERVAL, DEFAULT_CAMERA_INTERVAL))
+        return (
+            self._camera_snapshot is None
+            or time.monotonic() - self._camera_fetched_at >= minutes * 60
+        )
+
+    def _next_index(self) -> int:
+        """The next page in the rotation, skipping the camera until it's due."""
+        if not self.pages:
+            return 0
+        for step in range(1, len(self.pages) + 1):
+            index = (self._index + step) % len(self.pages)
+            if self.pages[index].kind != PAGE_CAMERA or self._camera_due:
+                return index
+        # Only the camera page and it isn't due: stay put and reuse the snapshot.
+        return self._index
 
     @callback
     def _notify(self) -> None:
@@ -358,7 +382,7 @@ class IdleScreenManager:
                 continue
 
             if now >= self._rotate_at:
-                self._index = (self._index + 1) % len(self.pages)
+                self._index = self._next_index()
                 self._rotate_at = now + self._interval
                 self._notify()
 
@@ -510,7 +534,10 @@ class IdleScreenManager:
         return high, low
 
     async def _prepare_camera(self) -> Callable[[], Image.Image]:
-        from homeassistant.components.camera import async_get_image
+        if not self._camera_due and self._camera_snapshot is not None:
+            # Battery cameras can wake up for every snapshot, so reuse the last one.
+            content, label = self._camera_snapshot
+            return partial(render_camera, content, label=label)
 
         cameras = [
             entity_id
@@ -522,8 +549,15 @@ class IdleScreenManager:
         choices = [c for c in cameras if c != self._last_camera] or cameras
         entity_id = random.choice(choices)
         self._last_camera = entity_id
-        image = await async_get_image(self.hass, entity_id, timeout=10)
+        content = await self._fetch_snapshot(entity_id)
         label = None
         if self.options.get(CONF_CAMERA_LABEL, True) and (state := self.hass.states.get(entity_id)):
             label = state.name
-        return partial(render_camera, image.content, label=label)
+        self._camera_snapshot = (content, label)
+        self._camera_fetched_at = time.monotonic()
+        return partial(render_camera, content, label=label)
+
+    async def _fetch_snapshot(self, entity_id: str) -> bytes:
+        from homeassistant.components.camera import async_get_image
+
+        return (await async_get_image(self.hass, entity_id, timeout=10)).content
