@@ -8,7 +8,8 @@ A HACS custom integration for Home Assistant. While nothing is playing, it shows
 uv venv --python 3.14 && uv pip install -r requirements_test.txt   # test env (pulls in homeassistant)
 .venv/bin/python -m pytest tests -q                                  # tests
 uvx ruff check . && uvx ruff format --check .                        # lint + format (CI runs both)
-python3 scripts/preview.py preview                                   # render every page to PNGs + contact_sheet.png
+python3 scripts/preview.py preview                                   # render every page + contact_sheet.png (still) and .webp (animated)
+python3 scripts/preview.py preview --still                           # render (and --push) the pages with animation off
 python3 scripts/preview.py preview --push                            # also cycle the frames on a device found over mDNS
 python3 scripts/preview.py preview --push <device-ip>                # ...or on one at a given address
 python3 scripts/make_icon.py                                         # regenerate brand/icon.png and icon@2x.png
@@ -28,6 +29,7 @@ CI (`.github/workflows/validate.yml`) runs hassfest, the HACS action and the tes
 
 - The device is a small microcontroller. It drops the odd request (timeouts, `408`) and sometimes takes 2–4 seconds to answer. The coordinator only marks entities unavailable after 3 failed polls in a row, and failed pushes retry after `RETRY_DELAY × failures`.
 - After music stops, the cloud can take about 2.5 minutes to mark `remoteMetadata.idle` true. That's expected.
+- Uploads take longer as files grow: 2–40 kB animations usually take 0.3–2.5 s, but a ~100 kB one took 11 s, and any upload can occasionally stall past 10 s. `POST /image` therefore uses `UPLOAD_TIMEOUT` (30 s), while other requests keep `REQUEST_TIMEOUT`. A timed-out upload is often still shown by the device.
 - The cloud sometimes re-sends its stock idle image over ours. `IdleScreenManager._handle_coordinator` notices the mismatch and pushes again, with a re-check scheduled after `RESYNC_GRACE`, because the coordinator uses `always_update=False` and only notifies listeners when the state changes.
 
 ## Layout
@@ -47,6 +49,7 @@ CI (`.github/workflows/validate.yml`) runs hassfest, the HACS action and the tes
 
 - **Keep `render/` free of Home Assistant imports.** Gather data on the event loop in `IdleScreenManager._prepare*`, then return a `functools.partial` of a pure render function. It runs in the executor via `_encode`.
 - **Frames are always 64×64 RGB** and are encoded with `render.to_webp` (lossless, well under the device's 768 kB limit). Check new pages with `scripts/preview.py` and look at `contact_sheet.png` before pushing to a device.
+- **Clock, weather and labelled camera pages are animations**, unless the `animate` option is off. Their renderers take `animate=False` for a single still frame, which must stay identical to the pages before animation existed (weather icons draw that still pose at `t=None`). Animated, they return a `render.Animation` (frames plus a per-frame duration), which `to_webp` encodes as a looping animated WebP. Keep loops seamless: motion uses whole cycles of the loop (weather icons take `t` in [0, 1)), and `animation.marquee` pads a scroll to a whole number of the page's loop or pulse periods. Watch the size of what you add, because `preview.py` prints each page's bytes and upload time grows with them (see device behaviour). Motion that only needs to change every other frame should do so: the encoder merges identical neighbours, which is how the sunny page stays at ~37 kB. `IdleScreenManager` caches the last encode by the render's arguments, because a weather page takes a few hundred ms to draw.
 - **Fonts are hand-drawn bitmaps** in `render/font.py` (`FONT_5X7` and `FONT_3X5`). Bold smears each pixel one to the right but skips single-pixel gaps, so `m`/`w`/`M`/`W` stay readable; keep that rule if you change glyphs. Draw text with `style.text` / `style.centered_text` for gradient fill and a shadow.
 - **Colours come from `Theme`s in `render/style.py`.** Clock themes follow the hour, template pages rotate through `PAGE_THEMES`, and alerts use `theme_from_color`. There are no user colour options.
 - **Weather icons** in `render/icons.py` are drawn at 4× in a 32-unit space with `Pen`, then downsampled.

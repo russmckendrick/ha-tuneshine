@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .animation import GAP, LOOP, Animation, marquee
 from .font import FONT_5X7, Color
-from .icons import ICONS, render_icon
-from .style import SIZE, Theme, background, centered_text, temperature_color, text
+from .icons import ICONS, SLOW, flash, render_icon
+from .style import (
+    SIZE,
+    Theme,
+    background,
+    centered_text,
+    scrolling_text,
+    temperature_color,
+    text,
+)
 
 LABELS = {
     "clear-night": "Clear",
@@ -68,7 +77,16 @@ THEMES: dict[str, Theme] = {
     "exceptional": _ALERT,
 }
 
+# Fuller names for when the label can scroll.
+SCROLLING_LABELS = {
+    "partlycloudy": "Partly cloudy",
+    "partlycloudy-night": "Partly cloudy",
+}
+
 WARM: Color = (255, 120, 70)
+# The condition label scrolls when it's wider than this.
+_LABEL_WIDTH = SIZE - 4
+_LIGHTNING: Color = (255, 255, 235)
 COOL: Color = (80, 180, 255)
 
 __all__ = ["ICONS", "LABELS", "render_weather"]
@@ -93,15 +111,60 @@ def render_weather(
     low: float | None = None,
     label: str | None = None,
     celsius: bool = True,
-) -> Image.Image:
-    """Render the current conditions."""
+    animate: bool = True,
+) -> Image.Image | Animation:
+    """Render the current conditions.
+
+    Animated, it's a loop: a moving icon and, if needed, a scrolling label.
+    Otherwise it's one frame with the still icon.
+    """
     theme = THEMES.get(condition or "", _GREY)
-    image, draw = background(theme)
+    fallback = (condition or "Unknown").replace("-", " ").title()
+    if not animate:
+        name = label or LABELS.get(condition or "", fallback)
+        image, draw = background(theme)
+        icon = render_icon(condition, 32)
+        image.paste(icon, (0, 1), icon)
+        _temperature(image, temperature, celsius)
+        centered_text(image, FONT_5X7, 37, name, theme.text_top, theme.text_bottom)
+        _high_low(image, draw, high, low)
+        return image
 
-    icon = render_icon(condition, 32)
-    image.paste(icon, (0, 1), icon)
+    name = label or SCROLLING_LABELS.get(condition or "") or LABELS.get(condition or "", fallback)
+    period = LOOP * SLOW.get(condition or "", 1)
+    icons = [render_icon(condition, 32, i / period) for i in range(period)]
+    name_width = FONT_5X7.text_width(name, bold=True)
+    offsets = marquee(name_width, _LABEL_WIDTH, period)
 
-    # Big temperature, coloured by how warm it is.
+    frames = []
+    for index, offset in enumerate(offsets):
+        image, draw = background(theme)
+        icon = icons[index % period]
+        image.paste(icon, (0, 1), icon)
+        _temperature(image, temperature, celsius)
+        if name_width <= _LABEL_WIDTH:
+            centered_text(image, FONT_5X7, 37, name, theme.text_top, theme.text_bottom)
+        else:
+            scrolling_text(
+                image,
+                FONT_5X7,
+                (2, 37),
+                _LABEL_WIDTH,
+                name,
+                offset,
+                GAP,
+                theme.text_top,
+                theme.text_bottom,
+            )
+        _high_low(image, draw, high, low)
+        if level := flash(condition, (index % period) / period):
+            image = Image.blend(image, Image.new("RGB", image.size, _LIGHTNING), 0.35 * level)
+        frames.append(image)
+    return Animation(frames)
+
+
+def _temperature(image: Image.Image, temperature: float | None, celsius: bool) -> None:
+    """Big temperature, coloured by how warm it is."""
     value = _temp(temperature)
     celsius_value = temperature if celsius or temperature is None else (temperature - 32) * 5 / 9
     top, bottom = temperature_color(celsius_value)
@@ -120,22 +183,22 @@ def render_weather(
         scale=scale,
     )
 
-    name = label or LABELS.get(condition or "", (condition or "Unknown").replace("-", " ").title())
-    centered_text(image, FONT_5X7, 37, name, theme.text_top, theme.text_bottom)
 
-    if high is not None or low is not None:
-        parts: list[tuple[bool, str]] = []
-        if high is not None:
-            parts.append((True, _temp(high)))
-        if low is not None:
-            parts.append((False, _temp(low)))
-        widths = [6 + FONT_5X7.text_width(t, bold=True) for _, t in parts]
-        gap = 5
-        x = (SIZE - sum(widths) - gap * (len(parts) - 1)) // 2
-        for (up, value_text), part_width in zip(parts, widths, strict=True):
-            color = WARM if up else COOL
-            _arrow(draw, x, 52, up, color)
-            text(image, FONT_5X7, (x + 6, 50), value_text, color, shadow=True)
-            x += part_width + gap
-
-    return image
+def _high_low(
+    image: Image.Image, draw: ImageDraw.ImageDraw, high: float | None, low: float | None
+) -> None:
+    if high is None and low is None:
+        return
+    parts: list[tuple[bool, str]] = []
+    if high is not None:
+        parts.append((True, _temp(high)))
+    if low is not None:
+        parts.append((False, _temp(low)))
+    widths = [6 + FONT_5X7.text_width(t, bold=True) for _, t in parts]
+    gap = 5
+    x = (SIZE - sum(widths) - gap * (len(parts) - 1)) // 2
+    for (up, value_text), part_width in zip(parts, widths, strict=True):
+        color = WARM if up else COOL
+        _arrow(draw, x, 52, up, color)
+        text(image, FONT_5X7, (x + 6, 50), value_text, color, shadow=True)
+        x += part_width + gap

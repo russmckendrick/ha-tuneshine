@@ -242,6 +242,37 @@ def centered_text(
     )
 
 
+def scrolling_text(
+    image: Image.Image,
+    font: PixelFont,
+    xy: tuple[int, int],
+    width: int,
+    value: str,
+    offset: int,
+    gap: int,
+    top: Color,
+    bottom: Color | None = None,
+    *,
+    bold: bool = True,
+    shadow: bool = True,
+) -> None:
+    """Gradient text scrolled offset px left inside a window width px wide.
+
+    Text wider than the window gets a second copy gap px behind, so it wraps
+    round seamlessly.
+    """
+    x, y = xy
+    height = (font.height + 1) + (1 if shadow else 0)
+    window = image.crop((x, y, x + width, y + height))
+    text_width = font.text_width(value, 1, bold)
+    starts = [-offset]
+    if text_width > width:
+        starts.append(-offset + text_width + gap)
+    for start in starts:
+        text(window, font, (start, 0), value, top, bottom, bold=bold, shadow=shadow)
+    image.paste(window, (x, y))
+
+
 def pill(
     image: Image.Image,
     font: PixelFont,

@@ -10,6 +10,7 @@ import io
 
 from PIL import Image
 
+from .animation import Animation
 from .camera import render_camera
 from .clock import render_clock
 from .font import FONT_3X5, FONT_5X7, Color, PixelFont
@@ -26,6 +27,7 @@ __all__ = [
     "MAX_BYTES",
     "PAGE_THEMES",
     "SIZE",
+    "Animation",
     "Color",
     "PixelFont",
     "Theme",
@@ -37,10 +39,27 @@ __all__ = [
 ]
 
 
-def to_webp(image: Image.Image) -> bytes:
-    """Encode a frame as the 64x64 WebP the device expects."""
-    if image.size != (SIZE, SIZE):
-        image = image.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+def to_webp(page: Image.Image | Animation) -> bytes:
+    """Encode a frame, or a looping animation, as the 64x64 WebP the device expects."""
+    frames = page.frames if isinstance(page, Animation) else [page]
+    frames = [
+        (f if f.size == (SIZE, SIZE) else f.resize((SIZE, SIZE), Image.Resampling.LANCZOS)).convert(
+            "RGB"
+        )
+        for f in frames
+    ]
     buffer = io.BytesIO()
-    image.convert("RGB").save(buffer, format="WEBP", lossless=True, quality=100)
+    if len(frames) == 1:
+        frames[0].save(buffer, format="WEBP", lossless=True, quality=100)
+    else:
+        frames[0].save(
+            buffer,
+            format="WEBP",
+            save_all=True,
+            append_images=frames[1:],
+            duration=page.duration,
+            loop=0,
+            lossless=True,
+            quality=100,
+        )
     return buffer.getvalue()

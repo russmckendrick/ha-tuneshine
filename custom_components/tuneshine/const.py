@@ -10,9 +10,12 @@ MANUFACTURER: Final = "Tuneshine"
 
 SCAN_INTERVAL: Final = timedelta(seconds=5)
 REQUEST_TIMEOUT: Final = 10
+# Animated WebPs of ~100 kB can take the device over 10 s to accept.
+UPLOAD_TIMEOUT: Final = 30
 
 CONF_PAGES: Final = "pages"
 CONF_ROTATE_INTERVAL: Final = "rotate_interval"
+CONF_ANIMATE: Final = "animate"
 CONF_CLOCK_24H: Final = "clock_24h"
 CONF_CLOCK_SHOW_DATE: Final = "clock_show_date"
 CONF_WEATHER_ENTITY: Final = "weather_entity"
@@ -32,6 +35,7 @@ PAGE_TYPES: Final = [PAGE_CLOCK, PAGE_WEATHER, PAGE_CAMERA, PAGE_TEMPLATE]
 
 DEFAULT_PAGES: Final = [PAGE_CLOCK]
 DEFAULT_ROTATE_INTERVAL: Final = 15
+DEFAULT_ANIMATE: Final = True
 # Minutes between camera snapshots; 0 means every time the page comes round.
 DEFAULT_CAMERA_INTERVAL: Final = 10
 DEFAULT_ALERT_COLOR: Final = (255, 70, 50)

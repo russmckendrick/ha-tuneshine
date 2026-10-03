@@ -1,9 +1,12 @@
 """Render every page type with sample data to PNGs for checking designs.
 
-    python scripts/preview.py [output_dir] [--push [HOST]]
+    python scripts/preview.py [output_dir] [--still] [--push [HOST]]
 
-Each frame is saved at 64x64 and as an 8x upscale with an LED-style grid, plus
-a contact sheet of everything. --push sends each frame to a Tuneshine in turn;
+Each frame is saved at 64x64 and as an 8x upscale with an LED-style grid.
+Animated pages are also saved as the WebP sent to the device and an 8x GIF; their
+PNGs show the first frame. contact_sheet.png shows every page still (as with
+animation turned off) and contact_sheet.webp plays the animated ones.
+--still renders, and pushes, the still pages only. --push sends each frame to a Tuneshine in turn;
 without a HOST it finds one on the network over mDNS.
 """
 
@@ -25,11 +28,13 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "custom_components" / "tuneshine"))
 
-from render import render_camera, render_clock, render_text, render_weather, to_webp
+from render import Animation, render_camera, render_clock, render_text, render_weather, to_webp
 from render.text import theme_from_color
 from render.weather import ICONS
 
 SCALE = 8
+# Every clock blinks the same way, so the animated sheet only needs a few.
+SHEET_CLOCKS = ("clock_09", "clock_22", "clock_12h")
 
 MDNS = ("224.0.0.251", 5353)
 SERVICE = "_tuneshine._tcp.local"
@@ -51,15 +56,20 @@ def sample_camera() -> bytes:
     return buffer.getvalue()
 
 
-def frames() -> dict[str, Image.Image]:
+def frames(animate: bool = True) -> dict[str, Image.Image | Animation]:
     now = datetime(2026, 10, 3, 9, 41, tzinfo=UTC)
     result = {
-        f"clock_{hour:02d}": render_clock(now.replace(hour=hour)) for hour in (2, 6, 9, 13, 18, 22)
+        f"clock_{hour:02d}": render_clock(now.replace(hour=hour), animate=animate)
+        for hour in (2, 6, 9, 13, 18, 22)
     }
-    result["clock_12h"] = render_clock(now.replace(hour=21), use_24h=False)
-    result["clock_wednesday"] = render_clock(now.replace(day=7, hour=15))
-    result["clock_no_date"] = render_clock(now, show_date=False)
-    result["camera"] = render_camera(sample_camera(), label="Front door")
+    result["clock_12h"] = render_clock(now.replace(hour=21), use_24h=False, animate=animate)
+    result["clock_wednesday"] = render_clock(now.replace(day=7, hour=15), animate=animate)
+    result["clock_no_date"] = render_clock(now, show_date=False, animate=animate)
+    camera = sample_camera()
+    result["camera"] = render_camera(camera, label="Front door", animate=animate)
+    result["camera_long_name"] = render_camera(
+        camera, label="Back garden doorbell", animate=animate
+    )
     texts = [
         "21.5°",
         "Office|21.5°C",
@@ -74,8 +84,43 @@ def frames() -> dict[str, Image.Image]:
     temps = [(18, 21, 12), (-3, 1, -6), (27, 31, 15), (8, 11, 4), (None, None, None)]
     for i, condition in enumerate(ICONS):
         temp, high, low = temps[i % len(temps)]
-        result[f"weather_{condition}"] = render_weather(condition, temp, high=high, low=low)
+        result[f"weather_{condition}"] = render_weather(
+            condition, temp, high=high, low=low, animate=animate
+        )
     return result
+
+
+def contact_sheet(pages: list[Image.Image], columns: int = 6, scale: int = 4) -> Image.Image:
+    tile = 64 * scale + 8
+    rows = -(-len(pages) // columns)
+    sheet = Image.new("RGB", (columns * tile, rows * tile), (30, 30, 30))
+    for index, image in enumerate(pages):
+        thumb = image.resize((64 * scale, 64 * scale), Image.Resampling.NEAREST)
+        sheet.paste(thumb, ((index % columns) * tile + 4, (index // columns) * tile + 4))
+    return sheet
+
+
+def animated_sheet(pages: list[Animation], path: Path, columns: int = 7, scale: int = 3) -> None:
+    """Play every animation side by side, each on its own loop, at the device's frame rate."""
+    tick = min(page.duration for page in pages)
+    ticks = max(len(page.frames) * page.duration for page in pages) // tick
+    sheets = [
+        contact_sheet(
+            [page.frames[(i * tick // page.duration) % len(page.frames)] for page in pages],
+            columns,
+            scale,
+        )
+        for i in range(ticks)
+    ]
+    sheets[0].save(
+        path,
+        save_all=True,
+        append_images=sheets[1:],
+        duration=tick,
+        loop=0,
+        quality=75,
+        method=4,
+    )
 
 
 def led(image: Image.Image) -> Image.Image:
@@ -182,7 +227,7 @@ def find_host() -> str:
     return address
 
 
-def push(host: str, name: str, image: Image.Image) -> None:
+def push(host: str, name: str, image: Image.Image | Animation) -> None:
     boundary = uuid.uuid4().hex
     metadata = json.dumps(
         {"idle": True, "overridable": True, "trackName": name, "serviceName": "Preview"}
@@ -217,27 +262,44 @@ def main() -> None:
         help="send each frame to a Tuneshine (found over mDNS if HOST is left out)",
     )
     parser.add_argument("--delay", type=float, default=4.0, help="seconds between pushed frames")
+    parser.add_argument("--still", action="store_true", help="render pages without animation")
     args = parser.parse_args()
     host = (args.push or find_host()) if args.push is not None else None
 
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
-    rendered = frames()
+    rendered = frames(animate=not args.still)
 
-    columns = 6
-    rows = -(-len(rendered) // columns)
-    tile = 64 * 4 + 8
-    sheet = Image.new("RGB", (columns * tile, rows * tile), (30, 30, 30))
-    for index, (name, image) in enumerate(rendered.items()):
+    for name, page in rendered.items():
+        image = page.frames[0] if isinstance(page, Animation) else page
         assert image.size == (64, 64), name
-        webp = to_webp(image)
+        webp = to_webp(page)
         image.save(out / f"{name}.png")
         led(image).save(out / f"{name}@8x.png")
-        print(f"{name}: {len(webp)} bytes webp")
-        thumb = image.resize((64 * 4, 64 * 4), Image.Resampling.NEAREST)
-        sheet.paste(thumb, ((index % columns) * tile + 4, (index // columns) * tile + 4))
-    sheet.save(out / "contact_sheet.png")
-    print(f"wrote {len(rendered)} frames to {out}/")
+        if isinstance(page, Animation):
+            (out / f"{name}.webp").write_bytes(webp)
+            big = [led(frame) for frame in page.frames]
+            big[0].save(
+                out / f"{name}@8x.gif",
+                save_all=True,
+                append_images=big[1:],
+                duration=page.duration,
+                loop=0,
+            )
+            print(f"{name}: {len(webp)} bytes webp, {len(page.frames)} frames")
+        else:
+            print(f"{name}: {len(webp)} bytes webp")
+
+    still = rendered if args.still else frames(animate=False)
+    contact_sheet(list(still.values())).save(out / "contact_sheet.png")
+    animations = [
+        page
+        for name, page in rendered.items()
+        if isinstance(page, Animation) and (not name.startswith("clock") or name in SHEET_CLOCKS)
+    ]
+    if animations:
+        animated_sheet(animations, out / "contact_sheet.webp")
+    print(f"wrote {len(rendered)} pages to {out}/")
 
     if host:
         for name, image in rendered.items():

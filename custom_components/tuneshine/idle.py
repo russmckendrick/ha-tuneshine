@@ -14,7 +14,7 @@ import hashlib
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -33,6 +33,7 @@ from .const import (
     CONF_ACTIVE_ENTITY,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_ANIMATE,
     CONF_CAMERA_ENTITIES,
     CONF_CAMERA_INTERVAL,
     CONF_CAMERA_LABEL,
@@ -42,6 +43,7 @@ from .const import (
     CONF_ROTATE_INTERVAL,
     CONF_TEMPLATES,
     CONF_WEATHER_ENTITY,
+    DEFAULT_ANIMATE,
     DEFAULT_CAMERA_INTERVAL,
     DEFAULT_PAGES,
     DEFAULT_ROTATE_INTERVAL,
@@ -53,7 +55,14 @@ from .const import (
     SERVICE_NAME,
 )
 from .coordinator import TuneshineCoordinator
-from .render import render_camera, render_clock, render_text, render_weather, to_webp
+from .render import (
+    Animation,
+    render_camera,
+    render_clock,
+    render_text,
+    render_weather,
+    to_webp,
+)
 from .schedule import ACTIVE_STATES, in_window, parse_time
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,8 +112,24 @@ def build_pages(options: dict[str, Any]) -> list[Page]:
     return pages
 
 
-def _encode(render: Callable[[], Image.Image]) -> bytes:
+# A pure render, run in the executor: a still frame or a looping animation.
+Render = Callable[[], Image.Image | Animation]
+
+
+def _encode(render: Render) -> bytes:
     return to_webp(render())
+
+
+def _render_key(render: Render) -> Hashable | None:
+    """What a render depends on, so an unchanged page isn't drawn again."""
+    if not isinstance(render, partial):
+        return None
+    key = (render.func, render.args, tuple(sorted(render.keywords.items())))
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
 
 
 class IdleScreenManager:
@@ -123,6 +148,7 @@ class IdleScreenManager:
         self.coordinator = coordinator
         self.options = dict(entry.options)
         self.pages = build_pages(self.options)
+        self.animate: bool = self.options.get(CONF_ANIMATE, DEFAULT_ANIMATE)
         self.enabled = False
 
         self._index = 0
@@ -144,6 +170,8 @@ class IdleScreenManager:
 
         self._alert_until: float | None = None
         self._last_hash: str | None = None
+        # The last page encoded and its WebP: animated pages are slow to draw.
+        self._encoded: tuple[Hashable, bytes] | None = None
         self._last_page_key: str | None = None
         self._last_push = 0.0
         self._was_playing = False
@@ -248,9 +276,7 @@ class IdleScreenManager:
                 return
         raise HomeAssistantError(f"No page '{key}' is configured")
 
-    async def async_show_alert(
-        self, render: Callable[[], Image.Image], title: str, duration: float
-    ) -> None:
+    async def async_show_alert(self, render: Render, title: str, duration: float) -> None:
         """Show a frame over everything, music included, for a while."""
         webp = await self.hass.async_add_executor_job(_encode, render)
         async with self._write_lock:
@@ -408,7 +434,13 @@ class IdleScreenManager:
     async def _push(self, page: Page) -> None:
         try:
             render = await self._prepare(page)
-            webp = await self.hass.async_add_executor_job(_encode, render)
+            key = _render_key(render)
+            if key is not None and self._encoded is not None and self._encoded[0] == key:
+                webp = self._encoded[1]
+            else:
+                webp = await self.hass.async_add_executor_job(_encode, render)
+                if key is not None:
+                    self._encoded = (key, webp)
         except Exception as err:  # noqa: BLE001 - one bad page must not stop the rotation
             if page.key not in self._failed_pages:
                 _LOGGER.warning("Could not render %s page: %s", page.title, err)
@@ -466,7 +498,7 @@ class IdleScreenManager:
 
     # ------------------------------------------------------------------- pages
 
-    async def _prepare(self, page: Page) -> Callable[[], Image.Image]:
+    async def _prepare(self, page: Page) -> Render:
         """Gather data on the event loop; return a pure render for the executor."""
         if page.kind == PAGE_CLOCK:
             return partial(
@@ -474,6 +506,7 @@ class IdleScreenManager:
                 dt_util.now(),
                 use_24h=self.options.get(CONF_CLOCK_24H, True),
                 show_date=self.options.get(CONF_CLOCK_SHOW_DATE, True),
+                animate=self.animate,
             )
         if page.kind == PAGE_WEATHER:
             return await self._prepare_weather()
@@ -491,7 +524,7 @@ class IdleScreenManager:
         except TemplateError as err:
             raise HomeAssistantError(f"template error: {err}") from err
 
-    async def _prepare_weather(self) -> Callable[[], Image.Image]:
+    async def _prepare_weather(self) -> Render:
         entity_id = self.options[CONF_WEATHER_ENTITY]
         state = self.hass.states.get(entity_id)
         if state is None:
@@ -509,6 +542,7 @@ class IdleScreenManager:
             high=high,
             low=low,
             celsius=state.attributes.get("temperature_unit") != "°F",
+            animate=self.animate,
         )
 
     async def _daily_high_low(self, entity_id: str) -> tuple[float | None, float | None]:
@@ -533,11 +567,11 @@ class IdleScreenManager:
         self._forecast[entity_id] = (time.monotonic(), high, low)
         return high, low
 
-    async def _prepare_camera(self) -> Callable[[], Image.Image]:
+    async def _prepare_camera(self) -> Render:
         if not self._camera_due and self._camera_snapshot is not None:
             # Battery cameras can wake up for every snapshot, so reuse the last one.
             content, label = self._camera_snapshot
-            return partial(render_camera, content, label=label)
+            return partial(render_camera, content, label=label, animate=self.animate)
 
         cameras = [
             entity_id
@@ -555,7 +589,7 @@ class IdleScreenManager:
             label = state.name
         self._camera_snapshot = (content, label)
         self._camera_fetched_at = time.monotonic()
-        return partial(render_camera, content, label=label)
+        return partial(render_camera, content, label=label, animate=self.animate)
 
     async def _fetch_snapshot(self, entity_id: str) -> bytes:
         from homeassistant.components.camera import async_get_image

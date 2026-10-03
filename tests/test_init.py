@@ -6,9 +6,11 @@ import asyncio
 import io
 import json
 import time
+from functools import partial
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -17,6 +19,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.tuneshine.const import DOMAIN
+from custom_components.tuneshine.idle import _render_key
+from custom_components.tuneshine.render import render_camera, render_weather
 
 from .conftest import HOST, IDLE_STATE, MAC, playing_state
 
@@ -42,6 +46,14 @@ def _metadata(call) -> dict[str, Any]:
         if options.get("name") == "metadata":
             return json.loads(value)
     raise AssertionError("no metadata in upload")
+
+
+def _image(call) -> Image.Image:
+    form = call[2]
+    for options, _headers, value in form._fields:
+        if options.get("name") == "image":
+            return Image.open(io.BytesIO(value))
+    raise AssertionError("no image in upload")
 
 
 async def _wait_for(predicate, timeout: float = 2.0) -> None:
@@ -85,6 +97,28 @@ async def test_pushes_idle_page(
     await hass.config_entries.async_unload(config_entry.entry_id)
     deletes = _calls(aioclient_mock, "DELETE", URL_IMAGE)
     assert deletes and deletes[-1][2] == {"preserveImage": False}
+
+
+@pytest.mark.parametrize(("animate", "frames"), [(None, 2), (True, 2), (False, 1)])
+async def test_animate_option(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    animate: bool | None,
+    frames: int,
+) -> None:
+    """Animation is on unless turned off; off, the clock goes up as one still frame."""
+    options: dict[str, Any] = {"pages": ["clock"]}
+    if animate is not None:
+        options["animate"] = animate
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=MAC, data={"host": HOST}, options=options)
+    _mock_device(aioclient_mock, IDLE_STATE)
+    await _setup(hass, entry)
+
+    await _wait_for(lambda: _calls(aioclient_mock, "POST", URL_IMAGE))
+    with _image(_calls(aioclient_mock, "POST", URL_IMAGE)[0]) as image:
+        assert image.size == (64, 64)
+        assert getattr(image, "n_frames", 1) == frames
+    await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_skips_push_while_playing(
@@ -289,3 +323,15 @@ async def test_camera_interval_zero_always_fetches(
     await idle._prepare(idle.pages[0])
     assert idle._fetch_snapshot.await_count == 2
     await hass.config_entries.async_unload(config_entry.entry_id)
+
+
+def test_render_key_reuses_unchanged_pages() -> None:
+    """Animated pages are slow to draw, so the same inputs map to the same cache key."""
+    sunny = partial(render_weather, "sunny", 18.0, high=21, low=None, celsius=True)
+    assert _render_key(sunny) == _render_key(
+        partial(render_weather, "sunny", 18.0, celsius=True, low=None, high=21)
+    )
+    assert _render_key(sunny) != _render_key(partial(render_weather, "sunny", 19.0))
+    assert _render_key(partial(render_camera, b"jpeg", label="Gate")) is not None
+    assert _render_key(partial(render_weather, ["unhashable"], None)) is None
+    assert _render_key(lambda: None) is None

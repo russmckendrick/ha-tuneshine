@@ -31,6 +31,7 @@ from .const import (
     CONF_ACTIVE_ENTITY,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_ANIMATE,
     CONF_CAMERA_ENTITIES,
     CONF_CAMERA_INTERVAL,
     CONF_CAMERA_LABEL,
@@ -40,6 +41,7 @@ from .const import (
     CONF_ROTATE_INTERVAL,
     CONF_TEMPLATES,
     CONF_WEATHER_ENTITY,
+    DEFAULT_ANIMATE,
     DEFAULT_CAMERA_INTERVAL,
     DEFAULT_PAGES,
     DEFAULT_ROTATE_INTERVAL,
@@ -144,6 +146,9 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
                     min=5, max=600, step=1, unit_of_measurement="s", mode=NumberSelectorMode.BOX
                 )
             ),
+            vol.Required(
+                CONF_ANIMATE, default=options.get(CONF_ANIMATE, DEFAULT_ANIMATE)
+            ): BooleanSelector(),
             vol.Required(
                 CONF_CLOCK_24H, default=options.get(CONF_CLOCK_24H, True)
             ): BooleanSelector(),

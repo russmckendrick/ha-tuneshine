@@ -6,11 +6,14 @@ from datetime import datetime
 
 from PIL import Image, ImageDraw
 
+from .animation import Animation
 from .font import FONT_3X5, FONT_5X7
-from .style import SIZE, background, centered_text, mix, pill, scale_color, text, time_theme
+from .style import SIZE, Theme, background, centered_text, mix, pill, scale_color, text, time_theme
 
 # Digits drawn 2x wide and 3x tall, bold: 11x21 px, a tall retro LED look.
 _DIGIT_SCALE = (2, 3)
+# The colon blinks: half a second on, half a second off.
+_BLINK_MS = 500
 
 
 def render_clock(
@@ -18,38 +21,34 @@ def render_clock(
     *,
     use_24h: bool = True,
     show_date: bool = True,
-) -> Image.Image:
-    """Render the time, coloured for the time of day, with the date around it."""
+    animate: bool = True,
+) -> Image.Image | Animation:
+    """Render the time, coloured for the time of day, with the date around it.
+
+    Animated, it's two frames, so the colon between hours and minutes blinks once a second.
+    """
+    if not animate:
+        return _clock_frame(now, use_24h, show_date, colon=True)
+    return Animation(
+        [_clock_frame(now, use_24h, show_date, colon) for colon in (True, False)], _BLINK_MS
+    )
+
+
+def _clock_frame(now: datetime, use_24h: bool, show_date: bool, colon: bool) -> Image.Image:
     theme = time_theme(now.hour)
     image, draw = background(theme)
 
     hours = f"{now.hour:02d}" if use_24h else str((now.hour % 12) or 12)
-    time_text = f"{hours}:{now.minute:02d}"
+    minutes = f"{now.minute:02d}"
+    width = FONT_5X7.text_width(f"{hours}:{minutes}", _DIGIT_SCALE[0], bold=True)
     time_y = 14 if show_date else 21
 
     if use_24h:
-        centered_text(
-            image,
-            FONT_5X7,
-            time_y,
-            time_text,
-            theme.text_top,
-            theme.text_bottom,
-            scale=_DIGIT_SCALE,
-        )
+        _time(image, (SIZE - width) // 2, time_y, hours, minutes, colon, theme)
     else:
         marker = "AM" if now.hour < 12 else "PM"
-        width = FONT_5X7.text_width(time_text, _DIGIT_SCALE[0], bold=True)
         x = (SIZE - width - 5) // 2
-        text(
-            image,
-            FONT_5X7,
-            (x, time_y),
-            time_text,
-            theme.text_top,
-            theme.text_bottom,
-            scale=_DIGIT_SCALE,
-        )
+        _time(image, x, time_y, hours, minutes, colon, theme)
         for i, letter in enumerate(marker):
             FONT_3X5.draw(draw, (x + width + 2, time_y + 3 + i * 6), letter, theme.accent)
 
@@ -71,6 +70,26 @@ def render_clock(
 
     _day_progress(draw, now, theme.accent, theme.muted)
     return image
+
+
+def _time(
+    image: Image.Image,
+    x: int,
+    y: int,
+    hours: str,
+    minutes: str,
+    colon: bool,
+    theme: Theme,
+) -> None:
+    """Draw hours, colon and minutes where they'd land as one string, leaving out the colon."""
+    advance = FONT_5X7.spacing * _DIGIT_SCALE[0]
+    parts = [(hours, True), (":", colon), (minutes, True)]
+    for part, visible in parts:
+        if visible:
+            text(
+                image, FONT_5X7, (x, y), part, theme.text_top, theme.text_bottom, scale=_DIGIT_SCALE
+            )
+        x += FONT_5X7.text_width(part, _DIGIT_SCALE[0], bold=True) + advance
 
 
 def _day_progress(draw: ImageDraw.ImageDraw, now: datetime, accent, muted) -> None:

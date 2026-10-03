@@ -7,7 +7,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import REQUEST_TIMEOUT
+from .const import REQUEST_TIMEOUT, UPLOAD_TIMEOUT
 
 
 class TuneshineError(Exception):
@@ -29,12 +29,14 @@ class TuneshineClient:
     def base_url(self) -> str:
         return f"http://{self.host}"
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(
+        self, method: str, path: str, *, timeout: float = REQUEST_TIMEOUT, **kwargs: Any
+    ) -> Any:
         try:
             async with self._session.request(
                 method,
                 f"{self.base_url}{path}",
-                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+                timeout=aiohttp.ClientTimeout(total=timeout),
                 **kwargs,
             ) as response:
                 body = await response.read()
@@ -60,7 +62,7 @@ class TuneshineClient:
         form = aiohttp.FormData()
         form.add_field("image", image, filename="image.webp", content_type="image/webp")
         form.add_field("metadata", json.dumps(metadata))
-        await self._request("POST", "/image", data=form)
+        await self._request("POST", "/image", data=form, timeout=UPLOAD_TIMEOUT)
 
     async def delete_image(self, *, preserve_image: bool | None = None) -> None:
         """Remove the local image and fall back to whatever the device shows next."""

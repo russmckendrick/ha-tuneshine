@@ -25,12 +25,18 @@ The Tuneshine's local API lets you set a local idle image marked as *overridable
 
 | Page | Shows |
 | --- | --- |
-| Clock | Big time with a colour scheme that changes through the day, the weekday tag, the date and a day-progress bar. 12- or 24-hour. |
-| Weather | A shaded icon for the condition, temperature coloured from icy blue to hot red, and today's high and low from the daily forecast. |
-| Random camera | A snapshot from one of your chosen cameras (never the same one twice in a row), cropped and punched up for LEDs, with a name tag. **Show cameras every** (default 10 minutes) limits how often a snapshot is taken, which saves battery cameras like Ring doorbells being woken up; in between, the camera page is skipped. |
+| Clock | Big time with a blinking colon and a colour scheme that changes through the day, the weekday tag, the date and a day-progress bar. 12- or 24-hour. |
+| Weather | An animated icon for the condition (falling rain and snow, drifting clouds, lightning flashes, twinkling stars), temperature coloured from icy blue to hot red, and today's high and low from the daily forecast. A condition name too long for the screen scrolls. |
+| Random camera | A snapshot from one of your chosen cameras (never the same one twice in a row), cropped and punched up for LEDs, with a pulsing live dot and a name tag that scrolls if it's too long. **Show cameras every** (default 10 minutes) limits how often a snapshot is taken, which saves battery cameras like Ring doorbells being woken up; in between, the camera page is skipped. |
 | Templates | One page per template, each with its own colour scheme. Split lines with `\|` or a newline. A short first line becomes a coloured heading tag. Short values are drawn big. |
 
-Every page and weather condition, rendered by `scripts/preview.py`:
+The clock, weather and camera pages are animated. Turn off **Animate pages** in the **Configure** dialog for still pages: the colon stays lit, the weather icons stay put, and long names are cut short instead of scrolling.
+
+The animated pages and every weather condition, rendered by `scripts/preview.py`:
+
+![The animated pages](docs/preview-animated.webp)
+
+Every page with animation turned off:
 
 ![Preview of the pages](docs/preview.png)
 
@@ -88,7 +94,8 @@ automation:
 ```bash
 uv venv --python 3.14 && uv pip install -r requirements_test.txt
 .venv/bin/python -m pytest tests
-python scripts/preview.py preview                       # render every page to PNGs
+python scripts/preview.py preview                       # render every page, plus still and animated contact sheets
+python scripts/preview.py preview --still               # render the pages with animation turned off
 python scripts/preview.py preview --push                # and cycle them on a Tuneshine found over mDNS
 python scripts/preview.py preview --push 192.168.1.50   # or on one at a given address
 ```

@@ -31,6 +31,7 @@
         "data": {
           "pages": "Pages",
           "rotate_interval": "Seconds per page",
+          "animate": "Animate pages",
           "clock_24h": "24-hour clock",
           "clock_show_date": "Show day and date under the clock",
           "weather_entity": "Weather entity",
@@ -43,6 +44,7 @@
           "active_entity": "Only while this entity is on"
         },
         "data_description": {
+          "animate": "Blink the clock's colon, move the weather icons, pulse the camera's live dot and scroll names too long for the screen. Turn off for still pages.",
           "camera_entities": "A random camera from this list is shown each time the camera page comes round.",
           "camera_interval": "Minutes between camera snapshots. In between, the camera page is skipped. Battery cameras can wake up for every snapshot, so keep this high for them. 0 shows a fresh snapshot every time round.",
           "templates": "Each template is its own page with its own colour scheme. Use | or a new line to split lines; a short first line becomes a coloured heading tag. See the README for examples.",
