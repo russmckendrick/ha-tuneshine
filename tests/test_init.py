@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntryState
@@ -193,4 +194,28 @@ async def test_condition_entity_gates_screen(
     hass.states.async_set("input_boolean.tuneshine_pages", "off")
     await _wait_for(lambda: _calls(aioclient_mock, "DELETE", URL_IMAGE))
     assert _calls(aioclient_mock, "DELETE", URL_IMAGE)[-1][2] == {"preserveImage": False}
+    await hass.config_entries.async_unload(config_entry.entry_id)
+
+
+async def test_repushes_when_cloud_replaces_our_page(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry, monkeypatch
+) -> None:
+    """The cloud re-sending its idle image inside the grace window still gets corrected."""
+    monkeypatch.setattr("custom_components.tuneshine.idle.RESYNC_GRACE", 0.3)
+    _mock_device(aioclient_mock, IDLE_STATE)
+    await _setup(hass, config_entry)
+    await _wait_for(lambda: _calls(aioclient_mock, "POST", URL_IMAGE))
+    pushes = len(_calls(aioclient_mock, "POST", URL_IMAGE))
+
+    # Straight after our push, /state shows the cloud's idle image instead.
+    replaced = {**IDLE_STATE, "localMetadata": {"itemId": "ha-clock", "idle": True}}
+    replaced["remoteMetadata"] = {**IDLE_STATE["remoteMetadata"], "itemId": "OTHER_IDLE"}
+    _mock_device(aioclient_mock, replaced)
+    config_entry.runtime_data.idle._last_push = time.monotonic()
+    await config_entry.runtime_data.coordinator.async_refresh()
+    assert not _calls(aioclient_mock, "POST", URL_IMAGE)
+
+    # No further state changes arrive, but the page is pushed again after the grace period.
+    await _wait_for(lambda: _calls(aioclient_mock, "POST", URL_IMAGE), timeout=3)
+    assert pushes >= 1
     await hass.config_entries.async_unload(config_entry.entry_id)

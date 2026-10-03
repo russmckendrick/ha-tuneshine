@@ -23,7 +23,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, TemplateError
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 from PIL import Image
@@ -131,6 +131,7 @@ class IdleScreenManager:
         self._task: asyncio.Task[None] | None = None
         self._unsub_coordinator: CALLBACK_TYPE | None = None
         self._unsub_condition: CALLBACK_TYPE | None = None
+        self._unsub_recheck: CALLBACK_TYPE | None = None
         self._active_from = parse_time(self.options.get(CONF_ACTIVE_FROM))
         self._active_to = parse_time(self.options.get(CONF_ACTIVE_TO))
         self._condition_entity: str | None = self.options.get(CONF_ACTIVE_ENTITY)
@@ -166,10 +167,10 @@ class IdleScreenManager:
 
     async def async_stop(self) -> None:
         """Stop rotating and hand the screen back to the device."""
-        for unsub in (self._unsub_coordinator, self._unsub_condition):
+        for unsub in (self._unsub_coordinator, self._unsub_condition, self._unsub_recheck):
             if unsub:
                 unsub()
-        self._unsub_coordinator = self._unsub_condition = None
+        self._unsub_coordinator = self._unsub_condition = self._unsub_recheck = None
         if self._task:
             self._task.cancel()
             self._task = None
@@ -296,13 +297,26 @@ class IdleScreenManager:
             and self._alert_until is None
             and self.coordinator.last_update_success
             and not self.coordinator.showing_ours
-            and time.monotonic() - self._last_push > RESYNC_GRACE
         ):
-            # Device rebooted, or something else replaced our image.
-            _LOGGER.debug("Idle screen missing from device, pushing again")
-            self._last_hash = None
-            self._wake.set()
+            # The device rebooted, or the Tuneshine cloud re-sent its own idle
+            # image over ours. Right after a push /state can simply be stale, so
+            # wait out the grace period; listeners only fire when the state
+            # changes, so schedule a re-check rather than dropping it.
+            since_push = time.monotonic() - self._last_push
+            if since_push > RESYNC_GRACE:
+                _LOGGER.debug("Idle screen missing from device, pushing again")
+                self._last_hash = None
+                self._wake.set()
+            elif self._unsub_recheck is None:
+                self._unsub_recheck = async_call_later(
+                    self.hass, RESYNC_GRACE - since_push + 0.1, self._recheck
+                )
         self._was_playing = playing
+
+    @callback
+    def _recheck(self, _now: Any) -> None:
+        self._unsub_recheck = None
+        self._handle_coordinator()
 
     @callback
     def _handle_condition(self, event: Event[EventStateChangedData]) -> None:
