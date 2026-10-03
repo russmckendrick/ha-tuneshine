@@ -1,9 +1,10 @@
 """Render every page type with sample data to PNGs for checking designs.
 
-    python scripts/preview.py [output_dir] [--push HOST]
+    python scripts/preview.py [output_dir] [--push [HOST]]
 
 Each frame is saved at 64x64 and as an 8x upscale with an LED-style grid, plus
-a contact sheet of everything. --push sends each frame to a Tuneshine in turn.
+a contact sheet of everything. --push sends each frame to a Tuneshine in turn;
+without a HOST it finds one on the network over mDNS.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import socket
+import struct
 import sys
 import time
 import urllib.request
@@ -27,6 +30,10 @@ from render.text import theme_from_color
 from render.weather import ICONS
 
 SCALE = 8
+
+MDNS = ("224.0.0.251", 5353)
+SERVICE = "_tuneshine._tcp.local"
+PTR, A, TXT, SRV = 12, 1, 16, 33
 
 
 def sample_camera() -> bytes:
@@ -81,6 +88,100 @@ def led(image: Image.Image) -> Image.Image:
     return big
 
 
+def _query(name: str, qtype: int) -> bytes:
+    labels = b"".join(bytes([len(part)]) + part.encode() for part in name.split("."))
+    return struct.pack("!6H", 0, 0, 1, 0, 0, 0) + labels + b"\0" + struct.pack("!2H", qtype, 1)
+
+
+def _name(data: bytes, offset: int) -> tuple[str, int]:
+    """Read a possibly compressed DNS name; return it and the offset just after it."""
+    labels: list[str] = []
+    end = None
+    for _ in range(128):
+        length = data[offset]
+        if length & 0xC0 == 0xC0:
+            end = end or offset + 2
+            offset = (length & 0x3F) << 8 | data[offset + 1]
+        elif length:
+            labels.append(data[offset + 1 : offset + 1 + length].decode(errors="replace"))
+            offset += 1 + length
+        else:
+            return ".".join(labels), end or offset + 1
+    raise ValueError("DNS name loops")
+
+
+def _records(data: bytes):
+    """Yield (name, type, rdata offset, rdata length) for every record in a DNS packet."""
+    _, _, questions, *sections = struct.unpack_from("!6H", data)
+    offset = 12
+    for _ in range(questions):
+        offset = _name(data, offset)[1] + 4
+    for _ in range(sum(sections)):
+        name, offset = _name(data, offset)
+        rtype, _, _, length = struct.unpack_from("!HHIH", data, offset)
+        yield name.lower(), rtype, offset + 10, length
+        offset += 10 + length
+
+
+def discover(timeout: float = 2.0) -> list[tuple[str, str]]:
+    """Ask the LAN for Tuneshines over mDNS; return (name, address) pairs."""
+    instances: dict[str, str] = {}
+    targets: dict[str, str] = {}
+    addresses: dict[str, str] = {}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+        sock.settimeout(0.2)
+        sock.sendto(_query(SERVICE, PTR), MDNS)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data = sock.recv(9000)
+            except TimeoutError:
+                continue
+            try:
+                for name, rtype, rdata, length in _records(data):
+                    if rtype == PTR and name == SERVICE.lower():
+                        instance = _name(data, rdata)[0].lower()
+                        instances.setdefault(instance, instance.split(".")[0])
+                    elif rtype == SRV:
+                        targets[name] = _name(data, rdata + 6)[0].lower()
+                    elif rtype == A:
+                        addresses[name] = socket.inet_ntoa(data[rdata : rdata + 4])
+                    elif rtype == TXT:
+                        end, i = rdata + length, rdata
+                        while i < end:
+                            key, _, value = data[i + 1 : i + 1 + data[i]].partition(b"=")
+                            if key == b"deviceName" and value:
+                                instances[name] = value.decode(errors="replace")
+                            i += 1 + data[i]
+            except (IndexError, struct.error, ValueError):
+                continue
+    found = []
+    for instance, label in instances.items():
+        target = targets.get(instance)
+        address = addresses.get(target) if target else None
+        if target and not address:
+            try:
+                address = socket.gethostbyname(target)
+            except OSError:
+                pass
+        if address:
+            found.append((label, address))
+    return found
+
+
+def find_host() -> str:
+    devices = discover()
+    if not devices:
+        sys.exit("No Tuneshine found on the network; pass its address with --push HOST")
+    if len(devices) > 1:
+        listing = "\n".join(f"  {address}  {name}" for name, address in devices)
+        sys.exit(f"Found more than one Tuneshine; pick one with --push HOST:\n{listing}")
+    name, address = devices[0]
+    print(f"found {name} at {address}")
+    return address
+
+
 def push(host: str, name: str, image: Image.Image) -> None:
     boundary = uuid.uuid4().hex
     metadata = json.dumps(
@@ -108,9 +209,16 @@ def push(host: str, name: str, image: Image.Image) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", nargs="?", default="preview")
-    parser.add_argument("--push", metavar="HOST", help="send each frame to this Tuneshine")
+    parser.add_argument(
+        "--push",
+        nargs="?",
+        const="",
+        metavar="HOST",
+        help="send each frame to a Tuneshine (found over mDNS if HOST is left out)",
+    )
     parser.add_argument("--delay", type=float, default=4.0, help="seconds between pushed frames")
     args = parser.parse_args()
+    host = (args.push or find_host()) if args.push is not None else None
 
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
@@ -131,9 +239,9 @@ def main() -> None:
     sheet.save(out / "contact_sheet.png")
     print(f"wrote {len(rendered)} frames to {out}/")
 
-    if args.push:
+    if host:
         for name, image in rendered.items():
-            push(args.push, name, image)
+            push(host, name, image)
             time.sleep(args.delay)
 
 

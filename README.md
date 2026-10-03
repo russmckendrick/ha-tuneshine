@@ -2,7 +2,9 @@
 
 A custom integration that puts Home Assistant on your [Tuneshine](https://tuneshine.rocks) when nothing is playing: a clock, the weather, a random camera, or anything you can write as a template. As soon as music starts, the album art takes over again.
 
-![Preview of the pages](docs/preview.png)
+| Clock | Weather | Random camera |
+| :---: | :---: | :---: |
+| ![The clock page on a Tuneshine](docs/photos/clock.jpg) | ![The weather page on a Tuneshine](docs/photos/weather.jpg) | ![A camera snapshot on a Tuneshine](docs/photos/camera.jpg) |
 
 ## How it works
 
@@ -27,6 +29,10 @@ The Tuneshine's local API lets you set a local idle image marked as *overridable
 | Weather | A shaded icon for the condition, temperature coloured from icy blue to hot red, and today's high and low from the daily forecast. |
 | Random camera | A snapshot from one of your chosen cameras (never the same one twice in a row), cropped and punched up for LEDs, with a name tag. **Show cameras every** (default 10 minutes) limits how often a snapshot is taken, which saves battery cameras like Ring doorbells being woken up; in between, the camera page is skipped. |
 | Templates | One page per template, each with its own colour scheme. Split lines with `\|` or a newline. A short first line becomes a coloured heading tag. Short values are drawn big. |
+
+Every page and weather condition, rendered by `scripts/preview.py`:
+
+![Preview of the pages](docs/preview.png)
 
 Template examples:
 
@@ -83,5 +89,6 @@ automation:
 uv venv --python 3.14 && uv pip install -r requirements_test.txt
 .venv/bin/python -m pytest tests
 python scripts/preview.py preview                       # render every page to PNGs
-python scripts/preview.py preview --push 192.168.1.50   # and cycle them on a real device
+python scripts/preview.py preview --push                # and cycle them on a Tuneshine found over mDNS
+python scripts/preview.py preview --push 192.168.1.50   # or on one at a given address
 ```

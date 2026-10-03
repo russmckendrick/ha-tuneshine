@@ -9,7 +9,8 @@ uv venv --python 3.14 && uv pip install -r requirements_test.txt   # test env (p
 .venv/bin/python -m pytest tests -q                                  # tests
 uvx ruff check . && uvx ruff format --check .                        # lint + format (CI runs both)
 python3 scripts/preview.py preview                                   # render every page to PNGs + contact_sheet.png
-python3 scripts/preview.py preview --push <device-ip>                # also cycle the frames on a real device
+python3 scripts/preview.py preview --push                            # also cycle the frames on a device found over mDNS
+python3 scripts/preview.py preview --push <device-ip>                # ...or on one at a given address
 python3 scripts/make_icon.py                                         # regenerate brand/icon.png and icon@2x.png
 ```
 
